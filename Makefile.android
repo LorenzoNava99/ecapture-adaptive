@@ -1,0 +1,95 @@
+# Android-specific Makefile targets for eCapture
+# Include this in the main Makefile
+
+.PHONY: android android-libpcap macos-setup build_android android-adaptive
+
+# Adaptive SSL detection targets
+ebpf_adaptive_noncore: user/bytecode/openssl_adaptive_kern_noncore.o
+user/bytecode/openssl_adaptive_kern_noncore.o: kern/openssl_adaptive_kern.c
+	$(CMD_CLANG) \
+		$(CFLAGS) \
+		-I$(KERN_DIR) \
+		-I$(KERN_DIR)/bpf \
+		-I$(KERN_DIR)/bpf/arm64 \
+		-target bpfel -c $< -o $@
+
+# Android adaptive build (with runtime offset detection)
+android-adaptive: android-libpcap ebpf_adaptive_noncore assets_noncore build_android_adaptive
+	@echo "Android adaptive build completed at: $$(date)"
+
+# Android adaptive binary build
+build_android_adaptive: .checkver_$(CMD_GO) assets_noncore $(TARGET_LIBPCAP)
+	@echo "Building eCapture for Android with adaptive SSL detection..."
+	@if [ -z "$(ANDROID_NDK_ROOT)" ]; then \
+		echo "Error: ANDROID_NDK_ROOT not set. Source android_build_env.sh first."; \
+		exit 1; \
+	fi
+	CGO_ENABLED=1 \
+	CGO_CFLAGS='-O2 -g -gdwarf-4 -I$(HOME)/libpcap-android -I$(ANDROID_NDK_ROOT)/sysroot/usr/include -I$(ANDROID_NDK_ROOT)/sysroot/usr/include/aarch64-linux-android' \
+	CGO_LDFLAGS='-O2 -g -L$(HOME)/libpcap-android -lpcap -static' \
+	GOOS=android GOARCH=arm64 \
+	CC=$(ANDROID_NDK_ROOT)/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android29-clang \
+	$(CMD_GO) build -trimpath -buildmode=pie -mod=readonly -tags 'androidgki,netgo,adaptive' \
+		-ldflags "-w -s -X 'github.com/gojue/ecapture/cli/cmd.GitVersion=androidgki_adaptive_arm64:$(VERSION_NUM):$(VERSION_FLAG)' -X 'github.com/gojue/ecapture/cli/cmd.ByteCodeFiles=$(BYTECODE_FILES)' -linkmode=external -extldflags -static" \
+		-o bin/ecapture-android-adaptive
+	@echo "Android adaptive build completed: bin/ecapture-android-adaptive"
+	@file bin/ecapture-android-adaptive
+
+# macOS setup target
+macos-setup:
+	@echo "Setting up macOS development environment..."
+	@chmod +x builder/init_macos_env.sh
+	@./builder/init_macos_env.sh
+
+# Android libpcap target
+android-libpcap:
+	@echo "Building libpcap for Android..."
+	@echo "Using existing libpcap submodule for testing..."
+	@if [ ! -d "lib/libpcap" ]; then \
+		echo "Error: libpcap submodule not found. Run 'git submodule update --init' first."; \
+		exit 1; \
+	fi
+	@echo "libpcap available for Android build (using host version for testing)"
+
+# Android build target
+android: android-libpcap ebpf_noncore assets_noncore build_android
+	@echo "Android build completed at: $$(date)"
+
+# Android binary build
+build_android: .checkver_$(CMD_GO) assets_noncore $(TARGET_LIBPCAP)
+	@echo "Building eCapture for Android..."
+	@if [ -z "$(ANDROID_NDK_ROOT)" ]; then \
+		echo "Error: ANDROID_NDK_ROOT not set. Source android_build_env.sh first."; \
+		exit 1; \
+	fi
+	CGO_ENABLED=1 \
+	CGO_CFLAGS='-O2 -g -gdwarf-4 -I$(HOME)/libpcap-android -I$(ANDROID_NDK_ROOT)/sysroot/usr/include -I$(ANDROID_NDK_ROOT)/sysroot/usr/include/aarch64-linux-android' \
+	CGO_LDFLAGS='-O2 -g -L$(HOME)/libpcap-android -lpcap -static' \
+	GOOS=android GOARCH=arm64 \
+	CC=$(ANDROID_NDK_ROOT)/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android29-clang \
+	$(CMD_GO) build -trimpath -buildmode=pie -mod=readonly -tags 'androidgki,netgo' \
+		-ldflags "-w -s -X 'github.com/gojue/ecapture/cli/cmd.GitVersion=androidgki_arm64:$(VERSION_NUM):$(VERSION_FLAG)' -X 'github.com/gojue/ecapture/cli/cmd.ByteCodeFiles=$(BYTECODE_FILES)' -linkmode=external -extldflags -static" \
+		-o bin/ecapture-android
+	@echo "Android build completed: bin/ecapture-android"
+	@file bin/ecapture-android
+
+# Clean Android build artifacts
+clean-android:
+	$(CMD_RM) -f bin/ecapture-android
+	@if [ -d "$(HOME)/libpcap-android" ]; then \
+		cd $(HOME)/libpcap-android && $(MAKE) clean; \
+	fi
+
+# Help for Android targets
+help-android:
+	@echo "Android build targets:"
+	@echo "  make macos-setup           # Set up macOS development environment"
+	@echo "  make android-libpcap       # Build libpcap for Android"
+	@echo "  make android               # Build eCapture for Android (full build)"
+	@echo "  make build_android         # Build Android binary only"
+	@echo "  make clean-android         # Clean Android build artifacts"
+	@echo ""
+	@echo "Prerequisites:"
+	@echo "  1. Run: make macos-setup"
+	@echo "  2. Run: source android_build_env.sh"
+	@echo "  3. Run: make android"

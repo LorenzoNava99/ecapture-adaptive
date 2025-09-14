@@ -1,0 +1,151 @@
+include variables.mk
+include functions.mk
+
+#
+# Responsible for creating ecapture snapshots for testing and releasing
+#
+
+.PHONY: all
+all: help
+release: snapshot build_deb snapshot_android
+
+#
+# make
+#
+
+.ONESHELL:
+SHELL = /bin/bash
+
+MAKEFLAGS += --no-print-directory
+
+.ONESHELL:
+.check_%:
+#
+	@command -v $* >/dev/null
+	if [ $$? -ne 0 ]; then
+		echo "missing required tool $*"
+		exit 1
+	else
+		touch $@ # avoid target rebuilds due to inexistent file
+	fi
+
+#
+# environment
+#
+
+.PHONY: env
+env:
+	DEBUG=$(DEBUG) ANDROID=$(ANDROID) CROSS_ARCH=$(CROSS_ARCH) SNAPSHOT_VERSION=$(SNAPSHOT_VERSION) $(CMD_MAKE) env
+
+#
+# usage
+#
+
+.PHONY: help
+help:
+	@echo ""
+	@echo "Create ecapture snapshots for testing and releasing"
+	@echo ""
+	@echo "To generate a release snapshot:"
+	@echo ""
+	@echo "    $$ make -f builder/Makefile.release snapshot"
+	@echo ""
+	@echo "    - Compiles ecapture"
+	@echo "    - Creates an archive of build artifacts along with license"
+	@echo "    - Takes a checksum of the archive"
+	@echo ""
+	@echo "    Example:"
+	@echo ""
+	@echo "        To create build artifacts versioned by latest git SHA:"
+	@echo ""
+	@echo "        $$ make -f builder/Makefile.release snapshot"
+	@echo ""
+	@echo "        To create build artifacts with version v0.1.6:"
+	@echo ""
+	@echo "        $$ SNAPSHOT_VERSION=v0.1.6 \ "
+	@echo "                make -f builder/Makefile.release snapshot"
+	@echo ""
+	@echo "To publish a release:"
+	@echo ""
+	@echo "    $$ SNAPSHOT_VERSION=v0.1.6 \ "
+	@echo "        make -f builder/Makefile.release publish"
+	@echo ""
+	@echo ""
+	@echo "Clean leftovers:"
+	@echo ""
+	@echo "    $$ make -f builder/Makefile.release clean"
+	@echo ""
+
+#
+# requirements
+#
+
+.PHONY: .check_tree
+.check_tree:
+	@if [ ! -d ./builder ]; then
+		echo "you must be in the root directory"
+		exit 1
+	fi
+
+$(OUTPUT_DIR):
+	$(CMD_MKDIR) -p $@
+
+# snapshot Linux non-CO-RE version, and non-CO-RE only on Linux OS.
+.PHONY: snapshot
+snapshot: \
+	$(OUTPUT_DIR) \
+	| .check_tree \
+	.check_$(CMD_TAR) \
+	.check_$(CMD_CHECKSUM) \
+	.check_$(CMD_GITHUB)
+	$(call allow-override,ANDROID,0)
+	$(call release_tar,linux,)
+
+.PHONY: snapshot_android
+snapshot_android: \
+	$(OUTPUT_DIR) \
+	| .check_tree \
+	.check_$(CMD_TAR) \
+	.check_$(CMD_CHECKSUM) \
+	.check_$(CMD_GITHUB)
+	$(call allow-override,ANDROID,1)
+	$(call release_tar,android,)
+
+.PHONY: publish
+publish: \
+	$(OUTPUT_DIR) \
+	$(OUT_ARCHIVE) \
+	$(OUT_DEB_FILE) \
+	| .check_tree \
+	.check_$(CMD_GITHUB)
+	@$(CMD_CD) $(OUTPUT_DIR)
+	@$(CMD_CHECKSUM) ecapture*v* | $(CMD_SED) 's/.\/bin\///g' > $(OUT_CHECKSUMS)
+	@FILES=$$(ls ecapture-*.tar.gz ecapture*.deb checksum-*.txt)
+	@$(CMD_GITHUB) release create $(DEB_VERSION) $$FILES --title "eCapture $(DEB_VERSION)"  --notes-file $(RELEASE_NOTES)
+
+.PHONY: clean
+clean:
+#
+	$(CMD_MAKE) clean
+
+.PHONY: deb
+deb: snapshot build_deb
+
+# 用于构建DEB包的目标, non-CO-RE default.
+build_deb:
+	# 创建软件包目录结构
+	$(CMD_RM) -rf $(BUILD_DIR)
+	$(CMD_MKDIR) -p $(BUILD_DIR)/DEBIAN
+	$(CMD_MKDIR) -p $(BUILD_DIR)/usr/local/bin
+    # 复制程序文件到软件包目录
+	$(CMD_CP) bin/ecapture $(BUILD_DIR)/usr/local/bin/ecapture  # 将二进制文件复制到目标位置
+    # 创建控制文件 (DEBIAN/control)
+	$(CMD_ECHO) "Package: $(PACKAGE_NAME)" > $(BUILD_DIR)/DEBIAN/control
+	$(CMD_ECHO) "Version: $(PACKAGE_VERSION)" >> $(BUILD_DIR)/DEBIAN/control
+	$(CMD_ECHO) "BuildDate: $(BUILD_DATE)" >> $(BUILD_DIR)/DEBIAN/control
+	$(CMD_ECHO) "Architecture: $(GOARCH)" >> $(BUILD_DIR)/DEBIAN/control
+	$(CMD_ECHO) "Maintainer: $(PACKAGE_MAINTAINER)" >> $(BUILD_DIR)/DEBIAN/control
+	$(CMD_ECHO) "Description: $(PACKAGE_DESC)" >> $(BUILD_DIR)/DEBIAN/control
+	$(CMD_ECHO) "Homepage: $(PACKAGE_HOMEPAGE)" >> $(BUILD_DIR)/DEBIAN/control
+    # 构建DEB包
+	$(CMD_DPKG-DEB) --build $(BUILD_DIR) $(OUT_DEB_FILE)

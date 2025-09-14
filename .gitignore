@@ -1,0 +1,75 @@
+# Binaries
+bin/
+*.o
+*.so
+*.a
+
+# Build artifacts
+user/bytecode/*.o
+assets/
+dist/
+
+# Go build artifacts
+vendor/
+go.sum
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Test files
+*.pcap
+*.pcapng
+*.keylog
+
+# Android NDK
+android-ndk*/
+android_build_env.sh
+
+# Environment files
+.env
+.env.local
+
+# Backup files
+*~
+*.bak
+*.orig
+
+# Build dependencies
+lib/
+
+# Old files from cleanup
+old_files/
+old_files_map.json
+
+# Temporary files
+*.tmp
+/tmp/
+
+# Archive files
+*.tar.gz
+*.zip
+
+# Configuration files
+*.conf
+config.yaml
+
+# Coverage files
+*.out
+coverage.html
+
+# Debugging
+debug/
+gdb_history
+
+# Android device specific
+/data/
+*.apk
